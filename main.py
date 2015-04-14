@@ -3,6 +3,7 @@
 import struct
 import zlib
 import os
+import StringIO
 
 #Check that first 8 byte of the file match the official PNG header:
 def checkHeader(hdr, writeToFile = None):
@@ -49,6 +50,7 @@ def printIHDR(header):
   interLaceMethod = struct.unpack("!B", header[12])
   print "Interlace method", interLaceMethod[0]
   print "End of image information"
+  return [width[0], height[0]]
 
 # http://stackoverflow.com/questions/4612136/how-to-set-parameters-in-python-zlib-module
 def write_chunk(outfile, chunkType, data=''):
@@ -65,15 +67,25 @@ def write_chunk(outfile, chunkType, data=''):
     outfile.write(struct.pack("!i", checksum))
 
 #Hello world -style editing of color bytes
-def editColorBytes(chunkData):
-    i = 1
+def editColorBytes(chunkData, dimensions, colorAdj = 0):
+    width = dimensions[0]
+    height = dimensions[1]
     newChunk = ""
     chunkData = zlib.decompress(chunkData)
-    colorAdj = 10
+    oldLen = len(chunkData)
+    print "Old data length:", oldLen
+    chunkData = StringIO.StringIO(chunkData)
+    #chunkData is a string. Each byte containg either R, B or G value
+    for i in range(height):
+      newRow = chunkData.read(width*3+1)
+      print "Row %d Filter: %d" % (i, struct.unpack("B", newRow[0])[0])
+    """
+    i = 0
     for colorVal in chunkData:
-      if (i % 3) == 1:
+      if (i % 3) == 2:
         oldVal = struct.unpack("B", colorVal)
         newVal = oldVal[0] + colorAdj
+        #newVal = colorVal + struct.pack("B", colorAdj)
         if newVal > 255:
           newVal = 255
         newColor = struct.pack("B", newVal)
@@ -81,24 +93,21 @@ def editColorBytes(chunkData):
       else:
         newChunk += colorVal
       i += 1
+    """
+    newLen = len(newChunk)
+    print "New data length:", newLen
     readyData = zlib.compress(newChunk)
     return readyData
 
-def main():
-  try:
-    os.unlink("newImage.png")
-  except OSError:
-    pass
-  imgFile = "image.png"
-  print "Opening", imgFile
-  fp = open(imgFile, "r")
-  new_fp = open("newImage.png", "wb")
+#Do some changes to image and save it as newFilename
+def editImageFile(filename, newFilename):
+  fp = open(filename, "r")
+  new_fp = open(newFilename, "wb")
   header = fp.read(8)
   if checkHeader(header, writeToFile = new_fp):
     print "Header ok"
   else:
     raise Warning("Header is not correct PNG-header")
-
   print ""
   while True:
     #Read 4-byte data length:
@@ -107,7 +116,7 @@ def main():
     if len(lenBytes) < 4:
       print "No more chunks to read"
       break
-    print "Reading new chunk from PNG file"
+    print "Reading new chunk from PNG file", filename
     length = convertToInt(lenBytes)
     print "Chunk length: %d bytes" % length
     #Read 4-byte chunk type:
@@ -128,15 +137,23 @@ def main():
       print "CRC (Python zlib):", (zlibCRC & 0xffffffff)
       raise Warning("CRC failed")
     if chunkType == "IHDR":
-      printIHDR(chunkData)
+      dim = printIHDR(chunkData)
     elif chunkType == "IDAT":
-      chunkData = editColorBytes(chunkData)      
-    print "Writing chunk to file"
+      chunkData = editColorBytes(chunkData, dim)      
+    print "Writing chunk to file", newFilename
     print ""
     write_chunk(new_fp, chunkType, chunkData)
-
   fp.close()
-  print "Exiting"
+  new_fp.close()
+
+def main():
+  newImgFile = "newImage.png"
+  imgFile = "image.png"
+  try:
+    os.unlink(newImgFile)
+  except OSError:
+    pass
+  editImageFile(imgFile, newImgFile)
 
 if __name__ == "__main__":
   main()
