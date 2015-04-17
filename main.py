@@ -4,6 +4,8 @@ import struct
 import zlib
 import os
 import StringIO
+import datetime
+import sys
 
 #Check that first 8 byte of the file match the official PNG header:
 def checkHeader(hdr, writeToFile = None):
@@ -93,7 +95,7 @@ def paeth(a, b, c):
     return struct.pack("B", c)
 
 # Reconstruct one Paeth filtered scanline
-def reconstructPaeth(curRow, lastRow, width):
+def reconPaeth(curRow, lastRow, width):
   # Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c))
   newRow = ""
   newRow += curRow[0]
@@ -125,7 +127,7 @@ def reconstructPaeth(curRow, lastRow, width):
   return newRow
 
 # Reconstruct one Sub filtered scanline
-def reconstructSub(curRow, lastRow, width):
+def reconSub(curRow, lastRow, width):
   # Recon(x) = Filt(x) + Recon(a)
   newRow = ""
   #newRow += b'\x00'
@@ -149,7 +151,7 @@ def reconstructSub(curRow, lastRow, width):
   return newRow
 
 # Reconstruct one Avg filtered scanline
-def reconstructAvg(curRow, lastRow, width):
+def reconAvg(curRow, lastRow, width):
   # Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2)
   newRow = ""
   newRow += curRow[0]
@@ -170,8 +172,10 @@ def reconstructAvg(curRow, lastRow, width):
   return newRow
 
 #Remove filtering from each line
-def reconstData(chunkData, dimensions, colorAdj = 0):
-    print "Reconstructing filtered data.."
+def reconstData(chunkData, dimensions):
+    dt = datetime.datetime.now()
+    startTime = dt.now()
+    print "Decompressing image data.."
     width = dimensions[0]
     height = dimensions[1]
     newChunk = ""
@@ -179,7 +183,10 @@ def reconstData(chunkData, dimensions, colorAdj = 0):
     chunkData = zlib.decompress(chunkData)
     oldLen = len(chunkData)
     chunkData = StringIO.StringIO(chunkData)
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    startTime = dt.now()
     #chunkData is a string. Each byte containg either R, B or G value
+    print "Reconstructing filtered data.."
     for i in range(height):
       newFilter = chunkData.read(1)
       newRow = chunkData.read(width*3)
@@ -188,13 +195,13 @@ def reconstData(chunkData, dimensions, colorAdj = 0):
       if newFilter == b'\x00':
         raise Warning("None filter is not implemented")
       elif newFilter == b'\x01':
-        newRow = reconstructSub(newRow, lastRow, width)
+        newRow = reconSub(newRow, lastRow, width)
       elif newFilter == b'\x02':
         raise Warning("Up filter is not implemented")
       elif newFilter == b'\x03':
-        newRow = reconstructAvg(newRow, lastRow, width)
+        newRow = reconAvg(newRow, lastRow, width)
       elif newFilter == b'\x04':
-        newRow = reconstructPaeth(newRow, lastRow, width)
+        newRow = reconPaeth(newRow, lastRow, width)
       else:
         raise Warning("Bad filter code")
       newRowLen = len(newRow)
@@ -212,22 +219,74 @@ def reconstData(chunkData, dimensions, colorAdj = 0):
       print "Debug: Old data length:", oldLen
       print "Debug: New data length:", newLen
       raise Warning("Reconstructed data doesn't contain correct amount of bytes")
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    startTime = dt.now()
+    print "Compressing image data.."
     readyData = zlib.compress(newChunk)
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
     return readyData
 
+def printFilterInfo(chunkData, dimensions):
+    dt = datetime.datetime.now()
+    startTime = dt.now()
+    print "Decompressing image data.."
+    width = dimensions[0]
+    height = dimensions[1]
+    filterInfo = [0] * 5
+    chunkData = zlib.decompress(chunkData)
+    chunkData = StringIO.StringIO(chunkData)
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    startTime = dt.now()
+    #chunkData is a string. Each byte containg either R, B or G value
+    print "Reading filter byte from each scanline.."
+    for i in range(height):
+      newFilter = chunkData.read(1)
+      newRow = chunkData.read(width*3)
+      oldRowLen = len(newRow)
+      #print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
+      if newFilter == b'\x00':
+        filterInfo[0] += 1
+      elif newFilter == b'\x01':
+        filterInfo[1] += 1
+      elif newFilter == b'\x02':
+        filterInfo[2] += 1
+      elif newFilter == b'\x03':
+        filterInfo[3] += 1
+      elif newFilter == b'\x04':
+        filterInfo[4] += 1
+      else:
+        raise Warning("Bad filter code")
+      newRowLen = len(newRow)
+      if newRowLen != oldRowLen:
+        print "Ending length of row:", newRowLen
+        print "Debug: Starting length of row:", oldRowLen
+        print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
+        raise Warning("Reconstruct didn't provide correct amount of bytes")
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    print "Filter information:"
+    print "Filter 0 (None) Used %d times in %d scanlines" % (filterInfo[0], height)
+    print "Filter 1 (Sub) Used %d times in %d scanlines" % (filterInfo[1], height)
+    print "Filter 2 (Up) Used %d times in %d scanlines" % (filterInfo[2], height)
+    print "Filter 3 (Avg) Used %d times in %d scanlines" % (filterInfo[3], height)
+    print "Filter 4 (Paeth) Used %d times in %d scanlines" % (filterInfo[4], height)
+
 #Do some changes to image and save it as newFilename
-def editImageFile(filename, newFilename):
-  fp = open(filename, "r")
-  new_fp = open(newFilename, "wb")
-  header = fp.read(8)
-  if checkHeader(header, writeToFile = new_fp):
+def readImageChunks(filename, writeToFile = None):
+  readFp = open(filename, "r")
+  header = readFp.read(8)
+  if writeToFile:
+    writeFp = open(newFilename, "wb")
+    retVal = checkHeader(header, writeToFile = writeFp)
+  else:
+    retVal = checkHeader(header)
+  if retVal:
     print "Header ok"
   else:
     raise Warning("Header is not correct PNG-header")
   print ""
   while True:
     #Read 4-byte data length:
-    lenBytes = fp.read(4)
+    lenBytes = readFp.read(4)
     #Break if there are no more chunks to read:
     if len(lenBytes) < 4:
       print "No more chunks to read"
@@ -236,12 +295,12 @@ def editImageFile(filename, newFilename):
     length = convertToInt(lenBytes)
     print "Chunk length: %d bytes" % length
     #Read 4-byte chunk type:
-    chunkType = fp.read(4)
+    chunkType = readFp.read(4)
     print "Chunk type", chunkType
     #Read chunk data:
-    chunkData = fp.read(length)
+    chunkData = readFp.read(length)
     #Read chunk CRC:
-    chunkCRCBytes = fp.read(4)
+    chunkCRCBytes = readFp.read(4)
     chunkCRC = convertToInt(chunkCRCBytes)
     #Calculate CRC of data:
     zlibCRC = zlib.crc32(chunkType)
@@ -255,21 +314,34 @@ def editImageFile(filename, newFilename):
     if chunkType == "IHDR":
       dim = printIHDR(chunkData)
     elif chunkType == "IDAT":
-      chunkData = reconstData(chunkData, dim)      
-    print "Writing chunk to file", newFilename
-    print ""
-    write_chunk(new_fp, chunkType, chunkData)
-  fp.close()
-  new_fp.close()
+      #chunkData = reconstData(chunkData, dim)      
+      printFilterInfo(chunkData, dim)      
+    if writeToFile:
+      print "Writing chunk to file", newFilename
+      print ""
+      write_chunk(writeFp, chunkType, chunkData)
+  readFp.close()
+  if writeToFile:
+    writeFp.close()
 
 def main():
-  newImgFile = "newImage.png"
-  imgFile = "image.png"
+  argc = len(sys.argv)
+  if argc > 1:
+    readImg = sys.argv[1]
+    if argc > 2:
+      writeImg = sys.argv[2]
+    else:
+      writeImg = None
+  else:
+    print "Usage: ./main.py read_image.png [ new_image.png ]"
+    return
+  """
   try:
-    os.unlink(newImgFile)
+    os.unlink(writeImg)
   except OSError:
     pass
-  editImageFile(imgFile, newImgFile)
+  """
+  readImageChunks(readImg, writeToFile = writeImg)
 
 if __name__ == "__main__":
   main()
