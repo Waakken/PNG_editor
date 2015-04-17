@@ -6,6 +6,7 @@ import os
 import StringIO
 import datetime
 import sys
+import pdb
 
 #Check that first 8 byte of the file match the official PNG header:
 def checkHeader(hdr, writeToFile = None):
@@ -52,6 +53,9 @@ def printIHDR(header):
   interLaceMethod = struct.unpack("!B", header[12])
   print "Interlace method", interLaceMethod[0]
   print "End of image information"
+
+  if (bitDepth[0] != 8) or (colorType[0] != 2):
+    raise Warning("Only bit depth 8 and color type 2 are supported")
   return [width[0], height[0]]
 
 # http://stackoverflow.com/questions/4612136/how-to-set-parameters-in-python-zlib-module
@@ -226,6 +230,78 @@ def reconstData(chunkData, dimensions):
     print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
     return readyData
 
+#Edit color values of a single non-filtered line
+def editLine(line, redAdj = 0, blueAdj = 0, greenAdj = 0):
+  line = bytearray(line)
+  i = 0
+  newLine = []
+  fixedLine = []
+  for byte in line:
+    if i % 3 == 0:
+      newLine.append(byte + redAdj)
+    elif i % 3 == 1:
+      newLine.append(byte + greenAdj)
+    elif i % 3 == 2:
+      newLine.append(byte + blueAdj)
+    i += 1
+  for byte in newLine:
+    if byte > 255:
+      byte = 255
+      #byte = byte % 256
+      fixedLine.append(byte)
+    else:
+      fixedLine.append(byte)
+  #pdb.set_trace()
+  newLine = struct.pack("%sB" % len(fixedLine), *fixedLine)
+  return newLine
+
+
+#Remove filtering from each line
+def editColors(chunkData, dimensions):
+    dt = datetime.datetime.now()
+    startTime = dt.now()
+    print "Decompressing image data.."
+    width = dimensions[0]
+    height = dimensions[1]
+    newChunk = ""
+    chunkData = zlib.decompress(chunkData)
+    oldLen = len(chunkData)
+    chunkData = StringIO.StringIO(chunkData)
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    startTime = dt.now()
+    #chunkData is a string. Each byte containg either R, B or G value
+    print "Editing pixels.."
+    for i in range(height):
+      newFilter = chunkData.read(1)
+      newRow = chunkData.read(width*3)
+      oldRowLen = len(newRow)
+      #print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
+      if newFilter == b'\x00':
+        newRow = editLine(newRow, blueAdj = 150, greenAdj = 150)
+      else:
+        #print "Warning: Only filter 0 gives expected results"
+        raise Warning("Unaccepted filter. Only 0 is accepted")
+      newRowLen = len(newRow)
+      if newRowLen != oldRowLen:
+        print "Ending length of row:", newRowLen
+        print "Debug: Starting length of row:", oldRowLen
+        print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
+        raise Warning("Reconstruct didn't provide correct amount of bytes")
+      # Set filter of each line to 0
+      newChunk += struct.pack("B", 0)
+      newChunk += newRow
+    newLen = len(newChunk)
+    if newRowLen != oldRowLen:
+      print "Debug: Old data length:", oldLen
+      print "Debug: New data length:", newLen
+      raise Warning("Reconstructed data doesn't contain correct amount of bytes")
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    startTime = dt.now()
+    print "Compressing image data.."
+    readyData = zlib.compress(newChunk)
+    print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+    return readyData
+
 def printFilterInfo(chunkData, dimensions):
     dt = datetime.datetime.now()
     startTime = dt.now()
@@ -275,7 +351,7 @@ def readImageChunks(filename, writeToFile = None):
   readFp = open(filename, "r")
   header = readFp.read(8)
   if writeToFile:
-    writeFp = open(newFilename, "wb")
+    writeFp = open(writeToFile, "wb")
     retVal = checkHeader(header, writeToFile = writeFp)
   else:
     retVal = checkHeader(header)
@@ -314,10 +390,11 @@ def readImageChunks(filename, writeToFile = None):
     if chunkType == "IHDR":
       dim = printIHDR(chunkData)
     elif chunkType == "IDAT":
+      #printFilterInfo(chunkData, dim)      
       #chunkData = reconstData(chunkData, dim)      
-      printFilterInfo(chunkData, dim)      
+      chunkData = editColors(chunkData, dim)      
     if writeToFile:
-      print "Writing chunk to file", newFilename
+      print "Writing chunk to file", writeToFile
       print ""
       write_chunk(writeFp, chunkType, chunkData)
   readFp.close()
