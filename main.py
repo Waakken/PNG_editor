@@ -7,6 +7,17 @@ import StringIO
 import datetime
 import sys
 import pdb
+import optparse
+
+def setupArgParser():
+  parser = optparse.OptionParser()
+  #parser.add_option("-w", "--write", dest="writeFile", help="Write data to this file", metavar="FILE")
+  parser.add_option("-f", "--filter", action = "store_true", dest="printFilter", help="Print filter information")
+  parser.add_option("-c", "--chunks", action = "store_true", dest="readChunks", help="Just read chunks from image")
+  parser.add_option("-r", "--recon", dest="reconFile", \
+                    help="Save reconstructed data to this file", metavar="FILE")
+  parser.add_option("-e", "--edit", dest="editFile", help="Save edited color data to this file", metavar="FILE")
+  return parser
 
 #Check that first 8 byte of the file match the official PNG header:
 def checkHeader(hdr, writeToFile = None):
@@ -29,6 +40,7 @@ def convertToInt(lengthBytes):
 #Print information contained in IHDR chunk.
 #No error is raised if any of the bytes is in valid
 def printIHDR(header):
+  print ""
   print "Image information"
   width = struct.unpack("!I", header[0:4])
   print "Width", width[0]
@@ -53,6 +65,7 @@ def printIHDR(header):
   interLaceMethod = struct.unpack("!B", header[12])
   print "Interlace method", interLaceMethod[0]
   print "End of image information"
+  print ""
 
   if (bitDepth[0] != 8) or (colorType[0] != 2):
     raise Warning("Only bit depth 8 and color type 2 are supported")
@@ -251,7 +264,7 @@ def editLine(line, redAdj = 0, blueAdj = 0, greenAdj = 0):
       fixedLine.append(byte)
     else:
       fixedLine.append(byte)
-  #pdb.set_trace()
+  pdb.set_trace()
   newLine = struct.pack("%sB" % len(fixedLine), *fixedLine)
   return newLine
 
@@ -277,10 +290,11 @@ def editColors(chunkData, dimensions):
       oldRowLen = len(newRow)
       #print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
       if newFilter == b'\x00':
-        newRow = editLine(newRow, blueAdj = 150, greenAdj = 150)
+        newRow = editLine(newRow)
       else:
         #print "Warning: Only filter 0 gives expected results"
-        raise Warning("Unaccepted filter. Only 0 is accepted")
+        #raise Warning("Unaccepted filter. Only 0 is accepted")
+        newRow = editLine(newRow)
       newRowLen = len(newRow)
       if newRowLen != oldRowLen:
         print "Ending length of row:", newRowLen
@@ -347,7 +361,7 @@ def printFilterInfo(chunkData, dimensions):
     print "Filter 4 (Paeth) Used %d times in %d scanlines" % (filterInfo[4], height)
 
 #Do some changes to image and save it as newFilename
-def readImageChunks(filename, writeToFile = None):
+def readImageChunks(filename, writeToFile = None, opMode = 0):
   readFp = open(filename, "r")
   header = readFp.read(8)
   if writeToFile:
@@ -390,9 +404,18 @@ def readImageChunks(filename, writeToFile = None):
     if chunkType == "IHDR":
       dim = printIHDR(chunkData)
     elif chunkType == "IDAT":
-      #printFilterInfo(chunkData, dim)      
-      #chunkData = reconstData(chunkData, dim)      
-      chunkData = editColors(chunkData, dim)      
+      #Print filter info
+      if opMode == 0:
+        printFilterInfo(chunkData, dim)      
+      #Reconstruct data and save to new image
+      elif opMode == 1:
+        chunkData = reconstData(chunkData, dim)      
+      #Edit color bytes and save to new image
+      elif opMode == 2:
+        chunkData = editColors(chunkData, dim)      
+      #Just read the chunks
+      elif opMode == 3:
+        pass
     if writeToFile:
       print "Writing chunk to file", writeToFile
       print ""
@@ -402,23 +425,16 @@ def readImageChunks(filename, writeToFile = None):
     writeFp.close()
 
 def main():
-  argc = len(sys.argv)
-  if argc > 1:
-    readImg = sys.argv[1]
-    if argc > 2:
-      writeImg = sys.argv[2]
-    else:
-      writeImg = None
-  else:
-    print "Usage: ./main.py read_image.png [ new_image.png ]"
-    return
-  """
-  try:
-    os.unlink(writeImg)
-  except OSError:
-    pass
-  """
-  readImageChunks(readImg, writeToFile = writeImg)
+  parser = setupArgParser()
+  (options, args) = parser.parse_args()
+  #pdb.set_trace()
+  if len(args) != 1:
+    print "Please give one image to read"
+    exit()
+  if options.printFilter:
+    readImageChunks(args[0], writeToFile = None, opMode = 0)
+  if options.readChunks:
+    readImageChunks(args[0], writeToFile = None, opMode = 4)
 
 if __name__ == "__main__":
   main()
