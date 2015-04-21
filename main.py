@@ -13,7 +13,6 @@ from PngEdit import PngEdit as png
 
 def setupArgParser():
   parser = optparse.OptionParser(usage="%prog image [options]")
-  #parser.add_option("-w", "--write", dest="writeFile", help="Write data to this file", metavar="FILE")
   parser.add_option("-f", "--filter", action = "store_true", dest="printFilter", help="Print filter information")
   parser.add_option("-d", "--debug", action = "store_true", dest="debug", help="Print debug information")
   parser.add_option("-c", "--chunks", action = "store_true", dest="readChunks", help="Only read chunks from image")
@@ -21,6 +20,7 @@ def setupArgParser():
   parser.add_option("-r", "--recon", dest="reconFile", \
                     help="Save reconstructed data to this file", metavar="FILE")
   parser.add_option("-e", "--edit", dest="editFile", help="Save edited color data to this file", metavar="FILE")
+  parser.add_option("-s", "--simple", dest="simpleFile", help="Combine all the data chunks. Leave only basic chunks to new file", metavar="FILE")
   return parser
 
 def main():
@@ -44,6 +44,8 @@ def main():
     p.readImageChunks(args[0], opMode = p.FILTER_MODE)
   if options.readChunks:
     p.readImageChunks(args[0], opMode = p.CHUNK_MODE)
+  if options.simpleFile:
+    p.readImageChunks(args[0], writeToFile = options.simpleFile, opMode = p.SIMPLE_MODE)
 
 if __name__ == "__main__":
   main()

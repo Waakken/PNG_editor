@@ -14,6 +14,7 @@ class PngEdit():
     self.RECON_MODE = 1
     self.EDIT_MODE = 2
     self.CHUNK_MODE = 3
+    self.SIMPLE_MODE = 4
     self.HDR_MODE = 5
 
     if debug:
@@ -31,7 +32,7 @@ class PngEdit():
     print 
     if headerBytes == corrHeader:
       if writeToFile:
-        print "Writing header to file"
+        log.debug("Writing header to file")
         writeToFile.write(bytearray(headerBytes))
       return True
     else:
@@ -362,6 +363,9 @@ class PngEdit():
   def readImageChunks(self, filename, writeToFile = None, opMode = 0):
     readFp = open(filename, "r")
     header = readFp.read(8)
+    combinedData = ""
+    chunkLenSum = 0
+    dataChunkCount = 0
     if writeToFile:
       writeFp = open(writeToFile, "wb")
       retVal = self.checkHeader(header, writeToFile = writeFp)
@@ -376,7 +380,7 @@ class PngEdit():
       lenBytes = readFp.read(4)
       #Break if there are no more chunks to read:
       if len(lenBytes) < 4:
-        print "No more chunks to read"
+        log.debug("All bytes read from file")
         break
       log.debug("Reading new chunk from PNG file %s" % filename)
       length = self.convertToInt(lenBytes)
@@ -398,11 +402,18 @@ class PngEdit():
         print "CRC sum:", chunkCRC
         print "CRC (Python zlib):", (zlibCRC & 0xffffffff)
         raise Warning("CRC failed")
+
       if chunkType == "IHDR":
-        dim = self.printIHDR(chunkData)
+        self.printIHDR(chunkData)
         if opMode == self.HDR_MODE:
           return
+        elif writeToFile:
+          self.write_chunk(writeFp, chunkType, chunkData)
+
       elif chunkType == "IDAT":
+        dataChunkCount += 1
+        combinedData += chunkData
+        chunkLenSum += length
         #Print filter info
         if opMode == self.FILTER_MODE:
           self.printFilterInfo(chunkData)      
@@ -415,10 +426,24 @@ class PngEdit():
         #Just read the chunks
         elif opMode == self.CHUNK_MODE:
           pass
-      if writeToFile:
-        print "Writing chunk to file", writeToFile
-        print ""
-        write_chunk(writeFp, chunkType, chunkData)
+        elif opMode == self.SIMPLE_MODE:
+          pass
+
+      elif chunkType == "IEND":
+        if opMode == self.SIMPLE_MODE:
+          log.info("Total calculated bytes in chunks: %d" % chunkLenSum)
+          log.info("Total calculated bytes in new chunk: %d" % len(combinedData))
+          log.info("Total data chunks in file: %d" % dataChunkCount)
+          log.info("Writing chunk IDAT to file %s" % writeToFile)
+          self.write_chunk(writeFp, "IDAT", combinedData)
+          log.info("Writing chunk %s to file %s" % (chunkType, writeToFile))
+          self.write_chunk(writeFp, chunkType, chunkData)
+          print "New file created:", writeToFile
+        elif opMode == self.CHUNK_MODE:
+          log.info("Total calculated bytes in chunks: %d" % chunkLenSum)
+          log.info("Total calculated bytes in new chunk: %d" % len(combinedData))
+          log.info("Total data chunks in file: %d" % dataChunkCount)
+
     readFp.close()
     if writeToFile:
       writeFp.close()
