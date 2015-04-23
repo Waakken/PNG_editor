@@ -37,15 +37,17 @@ def main():
     p = png()
   #pdb.set_trace()
 
-
   if options.readHdr:
     p.readImageChunks(args[0], opMode = p.HDR_MODE)
   if options.printFilter:
     p.readImageChunks(args[0], opMode = p.FILTER_MODE)
   if options.readChunks:
     p.readImageChunks(args[0], opMode = p.CHUNK_MODE)
+
   if options.simpleFile:
     p.readImageChunks(args[0], writeToFile = options.simpleFile, opMode = p.SIMPLE_MODE)
+  if options.reconFile:
+    p.readImageChunks(args[0], writeToFile = options.reconFile, opMode = p.RECON_MODE)
 
 if __name__ == "__main__":
   main()

@@ -1,3 +1,5 @@
+import math
+import pdb
 import struct
 import zlib
 import datetime
@@ -16,20 +18,21 @@ class PngEdit():
     self.CHUNK_MODE = 3
     self.SIMPLE_MODE = 4
     self.HDR_MODE = 5
+    
+    #Format = "%(levelname)s: %(message)s"
+    Format = "%(message)s"
 
     if debug:
-      log.basicConfig(level=log.DEBUG)
+      log.basicConfig(format = Format, level=log.DEBUG)
     elif info:
-      log.basicConfig(level=log.INFO)
+      log.basicConfig(format = Format, level=log.INFO)
     else:
-      log.basicConfig(level=log.WARNING)
-    log.basicConfig(format="%(levelname)s: %(message)s")
+      log.basicConfig(format = Format, level=log.WARNING)
 
   #Check that first 8 byte of the file match the official PNG header:
   def checkHeader(self, hdr, writeToFile = None):
     corrHeader = (137, 80, 78, 71, 13, 10, 26, 10)
     headerBytes = struct.unpack("8B", hdr)
-    print 
     if headerBytes == corrHeader:
       if writeToFile:
         log.debug("Writing header to file")
@@ -69,7 +72,6 @@ class PngEdit():
     #Interlace method should be 0 or 1
     interLaceMethod = struct.unpack("!B", header[12])[0]
     log.info("Interlace method %d" % interLaceMethod)
-    log.info("End of image information")
   
     if (bitDepth != 8) or (colorType != 2):
       # Don't remove this warning unless correct support has been enabled
@@ -143,7 +145,7 @@ class PngEdit():
       except struct.error:
         reconA = 0
   
-      reconX = struct.unpack("B", filtX)[0] + struct.unpack("B", paeth(reconA, reconB, reconC))[0]
+      reconX = struct.unpack("B", filtX)[0] + struct.unpack("B", self.paeth(reconA, reconB, reconC))[0]
       newRow += struct.pack("B", reconX)
   
     return newRow
@@ -151,55 +153,49 @@ class PngEdit():
   # Reconstruct one Sub filtered scanline
   def reconSub(self, curRow, lastRow):
     # Recon(x) = Filt(x) + Recon(a)
-    newRow = ""
+    newRow = bytearray()
     #newRow += b'\x00'
     newRow += curRow[0]
     newRow += curRow[1]
     newRow += curRow[2]
+    curRow = bytearray(curRow)
     for i in range(3, (self.width*3)):
-      try:
-        x = struct.unpack("B", curRow[i])[0]
-      except struct.error:
-        x = 0
-      try:
-        a = struct.unpack("B", newRow[i-3])[0]
-      except struct.error:
-        a = 0
+      x = curRow[i]
+      a = newRow[i-3]
       newX = (a + x)
       if newX > 255:
         newX = newX % 256
-      newRow += struct.pack("B", newX)
-      #newRow[i] = curRow[i] + curRow[i-1]
+      newRow.append(newX)
+    newRow = str(newRow)
     return newRow
   
   # Reconstruct one Avg filtered scanline
   def reconAvg(self, curRow, lastRow):
     # Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2)
-    newRow = ""
-    newRow += curRow[0]
-    newRow += curRow[1]
-    newRow += curRow[2]
+    newRow = bytearray()
+    curRow = bytearray(curRow)
+    newRow.append(curRow[0])
+    newRow.append(curRow[1])
+    newRow.append(curRow[2])
+    lastRow = bytearray(lastRow)
     for i in range(3, (self.width*3)):
+      a = curRow[i-3]
       try:
-        a = struct.unpack("B", curRow[i-3])[0]
-      except struct.error:
-        a = 0
-      try:
-        b = struct.unpack("B", lastRow[i])[0]
-      except struct.error:
-        b = 0
-      x = round( (a + b) / 2)
-      newRow += struct.pack("B", x)
-      #newRow[i] = curRow[i] + curRow[i-1]
+        b = lastRow[i]
+      except IndexError:
+        pdb.set_trace()
+      x = int(math.floor((a + b) / 2))
+      newRow.append(x)
+    newRow = str(newRow)
     return newRow
   
   #Remove filtering from each line
-  def reconstData(self, chunkData):
+  def reconData(self, chunkData):
       dt = datetime.datetime.now()
       startTime = dt.now()
       print "Decompressing image data.."
       newChunk = ""
-      lastRow = [0] * self.width
+      lastRow = [0] * (self.width * 3)
       chunkData = zlib.decompress(chunkData)
       oldLen = len(chunkData)
       chunkData = StringIO.StringIO(chunkData)
@@ -215,13 +211,13 @@ class PngEdit():
         if newFilter == b'\x00':
           raise Warning("None filter is not implemented")
         elif newFilter == b'\x01':
-          newRow = reconSub(newRow, lastRow)
+          newRow = self.reconSub(newRow, lastRow)
         elif newFilter == b'\x02':
           raise Warning("Up filter is not implemented")
         elif newFilter == b'\x03':
-          newRow = reconAvg(newRow, lastRow)
+          newRow = self.reconAvg(newRow, lastRow)
         elif newFilter == b'\x04':
-          newRow = reconPaeth(newRow, lastRow)
+          newRow = self.reconPaeth(newRow, lastRow)
         else:
           raise Warning("Bad filter code")
         newRowLen = len(newRow)
@@ -320,14 +316,14 @@ class PngEdit():
   def printFilterInfo(self, chunkData):
       dt = datetime.datetime.now()
       startTime = dt.now()
-      print "Decompressing image data.."
+      #print "Decompressing image data.."
       filterInfo = [0] * 5
       chunkData = zlib.decompress(chunkData)
       chunkData = StringIO.StringIO(chunkData)
-      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+      #print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       startTime = dt.now()
       #chunkData is a string. Each byte containg either R, B or G value
-      print "Reading filter byte from each scanline.."
+      #print "Reading filter byte from each scanline.."
       for i in range(self.height):
         newFilter = chunkData.read(1)
         newRow = chunkData.read(self.width*3)
@@ -351,7 +347,7 @@ class PngEdit():
           print "Debug: Starting length of row:", oldRowLen
           print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
           raise Warning("Reconstruct didn't provide correct amount of bytes")
-      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+      #print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       print "Filter information:"
       print "Filter 0 (None) Used %d times in %d scanlines" % (filterInfo[0], self.height)
       print "Filter 1 (Sub) Used %d times in %d scanlines" % (filterInfo[1], self.height)
@@ -408,6 +404,7 @@ class PngEdit():
         if opMode == self.HDR_MODE:
           return
         elif writeToFile:
+          log.info("Writing chunk %s to file %s" % (chunkType, writeToFile))
           self.write_chunk(writeFp, chunkType, chunkData)
 
       elif chunkType == "IDAT":
@@ -419,7 +416,9 @@ class PngEdit():
           self.printFilterInfo(chunkData)      
         #Reconstruct data and save to new image
         elif opMode == self.RECON_MODE:
-          chunkData = self.reconstData(chunkData)      
+          chunkData = self.reconData(chunkData)
+          #Work around to save the right data:
+          combinedData = chunkData
         #Edit color bytes and save to new image
         elif opMode == self.EDIT_MODE:
           chunkData = self.editColors(chunkData)      
@@ -430,7 +429,8 @@ class PngEdit():
           pass
 
       elif chunkType == "IEND":
-        if opMode == self.SIMPLE_MODE:
+        #if opMode == self.SIMPLE_MODE:
+        if writeToFile:
           log.info("Total calculated bytes in chunks: %d" % chunkLenSum)
           log.info("Total calculated bytes in new chunk: %d" % len(combinedData))
           log.info("Total data chunks in file: %d" % dataChunkCount)
@@ -442,7 +442,7 @@ class PngEdit():
         elif opMode == self.CHUNK_MODE:
           log.info("Total calculated bytes in chunks: %d" % chunkLenSum)
           log.info("Total calculated bytes in new chunk: %d" % len(combinedData))
-          log.info("Total data chunks in file: %d" % dataChunkCount)
+          log.info("Total data chunks in old file: %d new file: 1" % dataChunkCount)
 
     readFp.close()
     if writeToFile:
