@@ -253,28 +253,30 @@ class PngEdit():
       return readyData
   
   #Edit color values of a single non-filtered line
-  def editLine(self, line, redAdj = 0, blueAdj = 0, greenAdj = 0):
+  def editLine(self, line, redAdj = 50, blueAdj = 50, greenAdj = 0):
+    #pdb.set_trace()
     line = bytearray(line)
     i = 0
-    newLine = []
-    fixedLine = []
+    newLine = bytearray()
     for byte in line:
       if i % 3 == 0:
-        newLine.append(byte + redAdj)
-      elif i % 3 == 1:
-        newLine.append(byte + greenAdj)
-      elif i % 3 == 2:
-        newLine.append(byte + blueAdj)
+        newByte = byte + redAdj
+        if newByte > 255:
+          newByte = 255
+        newLine.append(newByte)
+      if i % 3 == 1:
+        newByte = byte + blueAdj
+        if newByte > 255:
+          newByte = 255
+        newLine.append(newByte)
+      if i % 3 == 2:
+        newByte = byte + greenAdj
+        if newByte > 255:
+          newByte = 255
+        newLine.append(newByte)
       i += 1
-    for byte in newLine:
-      if byte > 255:
-        byte = 255
-        #byte = byte % 256
-        fixedLine.append(byte)
-      else:
-        fixedLine.append(byte)
-    pdb.set_trace()
-    newLine = struct.pack("%sB" % len(fixedLine), *fixedLine)
+    #newLine = struct.pack("%sB" % len(fixedLine), *fixedLine)
+    newLine = str(newLine)
     return newLine
   
   
@@ -295,13 +297,10 @@ class PngEdit():
         newFilter = chunkData.read(1)
         newRow = chunkData.read(self.width*3)
         oldRowLen = len(newRow)
-        #print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
         if newFilter == b'\x00':
-          newRow = editLine(newRow)
+          newRow = self.editLine(newRow)
         else:
-          #print "Warning: Only filter 0 gives expected results"
-          #raise Warning("Unaccepted filter. Only 0 is accepted")
-          newRow = editLine(newRow)
+          raise Warning("Unaccepted filter. Only 0 is accepted")
         newRowLen = len(newRow)
         if newRowLen != oldRowLen:
           print "Ending length of row:", newRowLen
@@ -370,7 +369,7 @@ class PngEdit():
     log.debug("Operating mode: %s" % self.printMode(opMode))
     readFp = open(filename, "r")
     header = readFp.read(8)
-    combinedData = ""
+    newData = ""
     chunkLenSum = 0
     dataChunkCount = 0
     if writeToFile:
@@ -420,23 +419,21 @@ class PngEdit():
 
       elif chunkType == "IDAT":
         dataChunkCount += 1
-        combinedData += chunkData
+        newData += chunkData
         chunkLenSum += length
         #Print filter info
         if opMode == self.FILTER_MODE:
           self.printFilterInfo(chunkData)      
         #Reconstruct data and save to new image
         elif opMode == self.RECON_MODE:
-          chunkData = self.reconData(chunkData)
-          #Work around to save the right data:
-          combinedData = chunkData
+          newData = self.reconData(chunkData)
         #Edit color bytes and save to new image
         elif opMode == self.EDIT_MODE:
-          chunkData = self.editColors(chunkData)      
+          newData = self.editColors(chunkData)      
         #Just read the chunks
         elif opMode == self.CHUNK_MODE:
           pass
-        # Chunk was added to combinedData
+        # Chunk was added to newData
         elif opMode == self.SIMPLE_MODE:
           pass
         # Print color bytes of the desired scanline
@@ -456,16 +453,16 @@ class PngEdit():
       elif chunkType == "IEND":
         if writeToFile:
           log.info("Total calculated bytes in chunks: %d" % chunkLenSum)
-          log.info("Total calculated bytes in new chunk: %d" % len(combinedData))
+          log.info("Total calculated bytes in new chunk: %d" % len(newData))
           log.info("Total data chunks in file: %d" % dataChunkCount)
           log.info("Writing chunk IDAT to file %s" % writeToFile)
-          self.write_chunk(writeFp, "IDAT", combinedData)
+          self.write_chunk(writeFp, "IDAT", newData)
           log.info("Writing chunk %s to file %s" % (chunkType, writeToFile))
           self.write_chunk(writeFp, chunkType, chunkData)
           print "New file created:", writeToFile
         elif opMode == self.CHUNK_MODE:
           log.info("Total calculated bytes in chunks: %d" % chunkLenSum)
-          log.info("Total calculated bytes in new chunk: %d" % len(combinedData))
+          log.info("Total calculated bytes in new chunk: %d" % len(newData))
           log.info("Total data chunks in old file: %d new file: 1" % dataChunkCount)
 
     readFp.close()

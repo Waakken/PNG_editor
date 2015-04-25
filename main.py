@@ -51,6 +51,8 @@ def main():
     p.readChunks(args[0], writeToFile = options.simpleFile, opMode = p.SIMPLE_MODE)
   if options.reconFile:
     p.readChunks(args[0], writeToFile = options.reconFile, opMode = p.RECON_MODE)
+  if options.editFile:
+    p.readChunks(args[0], writeToFile = options.editFile, opMode = p.EDIT_MODE)
 
 if __name__ == "__main__":
   main()
