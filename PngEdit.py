@@ -110,58 +110,14 @@ class PngEdit():
       """Simple implementation of http://www.w3.org/TR/PNG/#9Filter-type-4-Paeth
       (nearly c/p the pseudo-code)
       """
-      try:
-        a = struct.unpack("B", a)[0]
-      except struct.error:
-        a = 0
-      try:
-        b = struct.unpack("B", b)[0]
-      except struct.error:
-        b = 0
-      try:
-        c = struct.unpack("B", c)[0]
-      except struct.error:
-        c = 0
       p = a + b - c
       pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
   
       if pa <= pb and pa <= pc:
-          return struct.pack("B", a)
+          return a
       elif pb <= pc:
-          return struct.pack("B", b)
-      return struct.pack("B", c)
-  
-  # Reconstruct one Paeth filtered scanline
-  def reconPaeth(self, curRow, lastRow):
-    # Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c))
-    newRow = ""
-    newRow += curRow[0]
-    newRow += curRow[1]
-    newRow += curRow[2]
-    #newRow += b'\x00'
-    for i in range(3, (self.width*3)):
-     
-      filtX = curRow[i]
-  
-      try:
-        reconA = struct.unpack("B", curRow[i-3])[0]
-      except struct.error:
-        reconA = 0
-  
-      try:
-        reconB = struct.unpack("B", lastRow[i])[0]
-      except struct.error:
-        reconB = 0
-  
-      try:
-        reconC = struct.unpack("B", lastRow[i-3])[0]
-      except struct.error:
-        reconA = 0
-  
-      reconX = struct.unpack("B", filtX)[0] + struct.unpack("B", self.paeth(reconA, reconB, reconC))[0]
-      newRow += struct.pack("B", reconX)
-  
-    return newRow
+          return b
+      return c
   
   # Reconstruct one Sub filtered scanline
   def reconSub(self, curRow, lastRow):
@@ -178,6 +134,22 @@ class PngEdit():
       if newX > 255:
         newX = newX % 256
       newRow.append(newX)
+    newRow = str(newRow)
+    return newRow
+  
+  # Reconstruct one Up filtered scanline
+  def reconUp(self, curRow, lastRow):
+    # Recon(x) = Filt(x) + Recon(b)
+    newRow = bytearray()
+    curRow = bytearray(curRow)
+    lastRow = bytearray(lastRow)
+    for i in range(0, (self.width*3)):
+      b = lastRow[i]
+      x = curRow[i]
+      recX = (x + b)
+      if recX > 255:
+        recX = recX % 256
+      newRow.append(recX)
     newRow = str(newRow)
     return newRow
   
@@ -200,6 +172,32 @@ class PngEdit():
       newRow.append(recX)
     newRow = str(newRow)
     return newRow
+
+  # Reconstruct one Paeth filtered scanline
+  def reconPaeth(self, curRow, lastRow):
+    # Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c))
+    newRow = bytearray()
+    curRow = bytearray(curRow)
+    lastRow = bytearray(lastRow)
+    for i in range(0, (self.width*3)):
+     
+      if i < 3:
+        a = 0
+        c = 0
+      else:
+        a = newRow[i-3]
+        c = lastRow[i-3]
+      b = lastRow[i]
+      x = curRow[i]
+
+      recX = x + self.paeth(a, b, c)
+      if recX > 255:
+        recX = recX % 256
+      newRow.append(recX)
+  
+    newRow = str(newRow)
+    return newRow
+  
   
   #Remove filtering from each line
   def reconData(self, chunkData):
@@ -225,7 +223,7 @@ class PngEdit():
         elif newFilter == b'\x01':
           newRow = self.reconSub(newRow, lastRow)
         elif newFilter == b'\x02':
-          raise Warning("Up filter is not implemented")
+          newRow = self.reconUp(newRow, lastRow)
         elif newFilter == b'\x03':
           newRow = self.reconAvg(newRow, lastRow)
         elif newFilter == b'\x04':

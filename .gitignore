@@ -3,3 +3,5 @@ imageFiles*
 testFiles*
 simple*
 recon*
+*~
+*.pyc
