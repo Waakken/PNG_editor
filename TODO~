@@ -1,0 +1,2 @@
+1. Change prints to use logging service
+2. Make Png reader class. So u can use class attributes as opModes, for example
