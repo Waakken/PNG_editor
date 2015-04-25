@@ -22,6 +22,9 @@ def setupArgParser():
                     help="Save reconstructed data to this file", metavar="FILE")
   parser.add_option("-e", "--edit", dest="editFile", help="Save edited color data to this file", metavar="FILE")
   parser.add_option("-s", "--simple", dest="simpleFile", help="Combine all the data chunks. Leave only basic chunks to new file", metavar="FILE")
+  parser.add_option("--blue", dest="blue", help="In edit mode: Add this value to blue bytes", metavar="INT")
+  parser.add_option("--red", dest="red", help="In edit mode: Add this value to red bytes", metavar="INT")
+  parser.add_option("--green", dest="green", help="In edit mode: Add this value to green bytes", metavar="INT")
   return parser
 
 def main():
@@ -37,6 +40,13 @@ def main():
   else:
     p = png()
   #pdb.set_trace()
+
+  if options.blue:
+    p.blueAdj = int(options.blue)
+  if options.red:
+    p.redAdj = int(options.red)
+  if options.green:
+    p.greenAdj = int(options.green)
 
   if options.readHdr:
     p.readChunks(args[0], opMode = p.HDR_MODE)

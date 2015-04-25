@@ -19,7 +19,11 @@ class PngEdit():
     self.SIMPLE_MODE = 4
     self.HDR_MODE = 5
     self.BYTES_MODE = 6
-    
+
+    self.redAdj = 0
+    self.blueAdj = 0
+    self.greenAdj = 0
+
     #Format = "%(levelname)s: %(message)s"
     Format = "%(message)s"
 
@@ -253,7 +257,10 @@ class PngEdit():
       return readyData
   
   #Edit color values of a single non-filtered line
-  def editLine(self, line, redAdj = 50, blueAdj = 50, greenAdj = 0):
+  def editLine(self, line):
+    redAdj = self.redAdj
+    blueAdj = self.blueAdj
+    greenAdj = self.greenAdj
     #pdb.set_trace()
     line = bytearray(line)
     i = 0
@@ -263,16 +270,22 @@ class PngEdit():
         newByte = byte + redAdj
         if newByte > 255:
           newByte = 255
+        elif newByte < 0:
+          newByte = 0
         newLine.append(newByte)
       if i % 3 == 1:
         newByte = byte + blueAdj
         if newByte > 255:
           newByte = 255
+        elif newByte < 0:
+          newByte = 0
         newLine.append(newByte)
       if i % 3 == 2:
         newByte = byte + greenAdj
         if newByte > 255:
           newByte = 255
+        elif newByte < 0:
+          newByte = 0
         newLine.append(newByte)
       i += 1
     #newLine = struct.pack("%sB" % len(fixedLine), *fixedLine)
