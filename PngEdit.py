@@ -19,6 +19,8 @@ class PngEdit():
     self.SIMPLE_MODE = 4
     self.HDR_MODE = 5
     self.BYTES_MODE = 6
+    self.PIXEL_MODE = 7
+    self.COMMON_EFFECT_MODE = 8
 
     self.redAdj = 0
     self.blueAdj = 0
@@ -44,6 +46,8 @@ class PngEdit():
       4 : "Simple Mode",
       5 : "Header Mode",
       6 : "Bytes Mode",
+      7 : "Pixel Mode",
+      8 : "Common-effect mode",
     }[mode_nr]
 
   #Check that first 8 byte of the file match the official PNG header:
@@ -273,15 +277,15 @@ class PngEdit():
         elif newByte < 0:
           newByte = 0
         newLine.append(newByte)
-      if i % 3 == 1:
-        newByte = byte + blueAdj
+      elif i % 3 == 1:
+        newByte = byte + greenAdj
         if newByte > 255:
           newByte = 255
         elif newByte < 0:
           newByte = 0
         newLine.append(newByte)
-      if i % 3 == 2:
-        newByte = byte + greenAdj
+      elif i % 3 == 2:
+        newByte = byte + blueAdj
         if newByte > 255:
           newByte = 255
         elif newByte < 0:
@@ -293,18 +297,15 @@ class PngEdit():
     return newLine
   
   
-  #Remove filtering from each line
+  #Edit color values of each pixel
   def editColors(self, chunkData):
       dt = datetime.datetime.now()
-      startTime = dt.now()
-      print "Decompressing image data.."
       newChunk = ""
       chunkData = zlib.decompress(chunkData)
       oldLen = len(chunkData)
       chunkData = StringIO.StringIO(chunkData)
-      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       startTime = dt.now()
-      #chunkData is a string. Each byte containg either R, B or G value
+      #chunkData is a string containing all color bytes. Each byte is either R, G or B value
       print "Editing pixels.."
       for i in range(self.height):
         newFilter = chunkData.read(1)
@@ -313,7 +314,8 @@ class PngEdit():
         if newFilter == b'\x00':
           newRow = self.editLine(newRow)
         else:
-          raise Warning("Unaccepted filter. Only 0 is accepted")
+          print "Filter byte: %d" % struct.unpack("B", newFilter)[0]
+          raise Warning("Unaccepted filter. Only 0 is accepted. Please reconstruct image first")
         newRowLen = len(newRow)
         if newRowLen != oldRowLen:
           print "Ending length of row:", newRowLen
@@ -377,6 +379,76 @@ class PngEdit():
       print "Filter 3 (Avg) Used %d times in %d scanlines" % (filterInfo[3], self.height)
       print "Filter 4 (Paeth) Used %d times in %d scanlines" % (filterInfo[4], self.height)
   
+  # Print pixel statistics
+  def printPixel(self, chunkData):
+      dt = datetime.datetime.now()
+      k = 0
+      chunkData = zlib.decompress(chunkData)
+      chunkData = StringIO.StringIO(chunkData)
+      byteArr = {}
+      retArr = {}
+      #chunkData is a string containing whole color information. Each byte is either R, B or G value
+      startTime = dt.now()
+      print "Reading and storing every byte.."
+      for i in range(self.height):
+        #Discard filter byte:
+        chunkData.read(1)
+        for j in range(self.width):
+          newPixel = bytearray(chunkData.read(3))
+          newVal = (newPixel[0]*256*256) + (newPixel[1]*256) + newPixel[2]
+          try:
+            byteArr[newVal] += 1
+          except KeyError:
+            byteArr[newVal] = 1
+          k += 1
+      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+      log.debug("Information of %d pixels saved. According to height: %d and width: %d there should be %d pixels"\
+        % (k, self.height, self.width, self.height*self.width))
+      byteArr = sorted(byteArr.items(), key = lambda x: x[1], reverse = True)
+      retArr.update(byteArr[0:20])
+      print "Most common pixels:"
+      #pdb.set_trace()
+      for i in range(20):
+        red = byteArr[i][0] / (256*256)
+        green = (byteArr[i][0] % (256*256)) / 256
+        blue = byteArr[i][0] % 256
+        print "R: %d G: %d B: %d Count: %d" % (red, green, blue, byteArr[i][1])
+      return
+
+  # Print pixel statistics
+  def createCommonEffect(self, chunkData, pixels):
+      dt = datetime.datetime.now()
+      chunkData = zlib.decompress(chunkData)
+      chunkData = StringIO.StringIO(chunkData)
+      newColorData = bytearray()
+      #chunkData is a string containing whole color information. Each byte is either R, B or G value
+      startTime = dt.now()
+      print "Reading pixels and saving only %d most common ones.." % len(pixels)
+      for i in range(self.height):
+        #Discard filter byte:
+        newColorData.append(chunkData.read(1))
+        for j in range(self.width):
+          newPixel = bytearray(chunkData.read(3))
+          newVal = (newPixel[0]*256*256) + (newPixel[1]*256) + newPixel[2]
+          if pixels.has_key(newVal):
+            newColorData.append(newVal)
+          else:
+            newColorData.append(0)
+      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+      log.debug("Information of %d pixels saved. According to height: %d and width: %d there should be %d pixels"\
+        % (k, self.height, self.width, self.height*self.width))
+      byteArr = sorted(byteArr.items(), key = lambda x: x[1], reverse = True)
+      retArr.update(byteArr[0:20])
+      print "Most common pixels:"
+      #pdb.set_trace()
+      for i in range(20):
+        red = byteArr[i][0] / (256*256)
+        green = (byteArr[i][0] % (256*256)) / 256
+        blue = byteArr[i][0] % 256
+        print "R: %d G: %d B: %d Count: %d" % (red, green, blue, byteArr[i][1])
+      return
+
+  
   #Do some changes to image and save it as newFilename
   def readChunks(self, filename, bytesLine = 0, writeToFile = None, opMode = 0):
     log.debug("Operating mode: %s" % self.printMode(opMode))
@@ -416,7 +488,7 @@ class PngEdit():
       zlibCRC = zlib.crc32(chunkType)
       zlibCRC = zlib.crc32(chunkData, zlibCRC)
       if (zlibCRC & 0xffffffff) == chunkCRC:
-        log.debug("CRC passed")
+        pass
       else:
         print "CRC sum:", chunkCRC
         print "CRC (Python zlib):", (zlibCRC & 0xffffffff)
@@ -462,6 +534,12 @@ class PngEdit():
           chunkData = struct.unpack("%sB" % (self.width*3), chunkData[startByte:endByte])
           print "", chunkData
           break
+        elif opMode == self.PIXEL_MODE:
+          self.printPixel(chunkData)
+        elif opMode == self.COMMON_EFFECT_MODE:
+          pixels = self.printPixel(chunkData)
+          newData = self.createCommonEffect(chunkData, pixels)
+
 
       elif chunkType == "IEND":
         if writeToFile:

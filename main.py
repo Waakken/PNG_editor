@@ -15,13 +15,14 @@ def setupArgParser():
   parser = optparse.OptionParser(usage="%prog image [options]")
   parser.add_option("-f", "--filter", action = "store_true", dest="printFilter", help="Print filter information")
   parser.add_option("-d", "--debug", action = "store_true", dest="debug", help="Print debug information")
-  parser.add_option("-c", "--chunks", action = "store_true", dest="readChunks", help="Only read chunks from image")
-  parser.add_option("-b", "--bytes", dest="readBytes", help="Print first line of color bytes, then exit")
-  parser.add_option("-H", "--hdr", action = "store_true", dest="readHdr", help="Print image data then exit")
+  parser.add_option("-c", "--chunks", action = "store_true", dest="readChunks", help="Print chunk information")
+  parser.add_option("-b", "--bytes", dest="readBytes", help="Print color bytes of LINE", metavar="LINE")
+  parser.add_option("-H", "--hdr", action = "store_true", dest="readHdr", help="Print image information")
+  parser.add_option("-p", "--pixel", action = "store_true", dest="readPixel", help="Print pixel information")
   parser.add_option("-r", "--recon", dest="reconFile", \
                     help="Save reconstructed data to this file", metavar="FILE")
   parser.add_option("-e", "--edit", dest="editFile", help="Save edited color data to this file", metavar="FILE")
-  parser.add_option("-s", "--simple", dest="simpleFile", help="Combine all the data chunks. Leave only basic chunks to new file", metavar="FILE")
+  parser.add_option("-s", "--simple", dest="simpleFile", help="Combine all data chunks. Leave only basic chunks to new file", metavar="FILE")
   parser.add_option("--blue", dest="blue", help="In edit mode: Add this value to blue bytes", metavar="INT")
   parser.add_option("--red", dest="red", help="In edit mode: Add this value to red bytes", metavar="INT")
   parser.add_option("--green", dest="green", help="In edit mode: Add this value to green bytes", metavar="INT")
@@ -47,16 +48,21 @@ def main():
     p.redAdj = int(options.red)
   if options.green:
     p.greenAdj = int(options.green)
+      
 
+  # Print information:
   if options.readHdr:
     p.readChunks(args[0], opMode = p.HDR_MODE)
   if options.printFilter:
     p.readChunks(args[0], opMode = p.FILTER_MODE)
   if options.readChunks:
     p.readChunks(args[0], opMode = p.CHUNK_MODE)
+  if options.readPixel:
+    p.readChunks(args[0], opMode = p.PIXEL_MODE)
   if options.readBytes:
     p.readChunks(args[0], bytesLine = int(options.readBytes), opMode = p.BYTES_MODE)
 
+  # Create new image:
   if options.simpleFile:
     p.readChunks(args[0], writeToFile = options.simpleFile, opMode = p.SIMPLE_MODE)
   if options.reconFile:
