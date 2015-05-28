@@ -5,6 +5,7 @@ import zlib
 import datetime
 import StringIO
 import logging as log
+import random
 
 class PngEdit():
 
@@ -26,6 +27,8 @@ class PngEdit():
     self.blueAdj = 0
     self.greenAdj = 0
 
+    self.pixelCount = 100
+
     #Format = "%(levelname)s: %(message)s"
     Format = "%(message)s"
 
@@ -40,7 +43,7 @@ class PngEdit():
   def printMode(self, mode_nr):
     return {
       0 : "Filter Mode",
-      1 : "Recon Mode",
+      1 : "Reconstruction Mode",
       2 : "Edit Mode",
       3 : "Chunk Mode",
       4 : "Simple Mode",
@@ -210,14 +213,11 @@ class PngEdit():
   #Remove filtering from each line
   def reconData(self, chunkData):
       dt = datetime.datetime.now()
-      startTime = dt.now()
-      print "Decompressing image data.."
       newChunk = ""
       lastRow = [0] * (self.width * 3)
       chunkData = zlib.decompress(chunkData)
       oldLen = len(chunkData)
       chunkData = StringIO.StringIO(chunkData)
-      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       startTime = dt.now()
       #chunkData is a string. Each byte containg either R, B or G value
       print "Reconstructing filtered data.."
@@ -338,21 +338,17 @@ class PngEdit():
       return readyData
   
   def printFilterInfo(self, chunkData):
+      #chunkData is a string. Each byte containg either R, B or G value
       dt = datetime.datetime.now()
       startTime = dt.now()
-      #print "Decompressing image data.."
       filterInfo = [0] * 5
       chunkData = zlib.decompress(chunkData)
       chunkData = StringIO.StringIO(chunkData)
-      #print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       startTime = dt.now()
-      #chunkData is a string. Each byte containg either R, B or G value
-      #print "Reading filter byte from each scanline.."
       for i in range(self.height):
         newFilter = chunkData.read(1)
         newRow = chunkData.read(self.width*3)
         oldRowLen = len(newRow)
-        #print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
         if newFilter == b'\x00':
           filterInfo[0] += 1
         elif newFilter == b'\x01':
@@ -371,7 +367,6 @@ class PngEdit():
           print "Debug: Starting length of row:", oldRowLen
           print "Debug: Row %d Filter: %d" % (i, struct.unpack("B", newFilter[0])[0])
           raise Warning("Reconstruct didn't provide correct amount of bytes")
-      #print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       print "Filter information:"
       print "Filter 0 (None) Used %d times in %d scanlines" % (filterInfo[0], self.height)
       print "Filter 1 (Sub) Used %d times in %d scanlines" % (filterInfo[1], self.height)
@@ -380,19 +375,21 @@ class PngEdit():
       print "Filter 4 (Paeth) Used %d times in %d scanlines" % (filterInfo[4], self.height)
   
   # Print pixel statistics
-  def printPixel(self, chunkData):
+  def printPixel(self, chunkData, pixelCount = 10):
+      #chunkData is a string containing whole color information. Each byte is either R, B or G value
       dt = datetime.datetime.now()
       k = 0
       chunkData = zlib.decompress(chunkData)
       chunkData = StringIO.StringIO(chunkData)
       byteArr = {}
       retArr = {}
-      #chunkData is a string containing whole color information. Each byte is either R, B or G value
       startTime = dt.now()
-      print "Reading and storing every byte.."
+      print "Saving pixel information.."
       for i in range(self.height):
-        #Discard filter byte:
-        chunkData.read(1)
+        filt = chunkData.read(1)
+        if filt != b'\x00':
+          print "Filter byte: %d" % struct.unpack("B", filt)[0]
+          raise Warning("Only filter 0 is accepted. Please reconstruct image first")
         for j in range(self.width):
           newPixel = bytearray(chunkData.read(3))
           newVal = (newPixel[0]*256*256) + (newPixel[1]*256) + newPixel[2]
@@ -404,54 +401,89 @@ class PngEdit():
       print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       log.debug("Information of %d pixels saved. According to height: %d and width: %d there should be %d pixels"\
         % (k, self.height, self.width, self.height*self.width))
+      diffPixels = len(byteArr.items())
+      log.debug("Found %d different colors in this image" % diffPixels)
+      portion = round((float(diffPixels)/(256**3))*100, 2)
+      log.debug("Thats %.2f%% of max 16M" % portion)
       byteArr = sorted(byteArr.items(), key = lambda x: x[1], reverse = True)
-      retArr.update(byteArr[0:20])
-      print "Most common pixels:"
+      if pixelCount > diffPixels:
+        pixelCount = diffPixels
+      retArr.update(byteArr[0:pixelCount])
+      log.info("%d most common pixels:" % pixelCount)
+      div = 256*256
+      for i in range(pixelCount):
+        log.debug("\nCoded value of pixel: %d" % byteArr[i][0])
+        red = byteArr[i][0] / div
+        green = (byteArr[i][0] - red*div) / 256
+        blue = ((byteArr[i][0] - red*div) - green*256)
+        log.info( "R: %d G: %d B: %d Count: %d" % (red, green, blue, byteArr[i][1]))
       #pdb.set_trace()
-      for i in range(20):
-        red = byteArr[i][0] / (256*256)
-        green = (byteArr[i][0] % (256*256)) / 256
-        blue = byteArr[i][0] % 256
-        print "R: %d G: %d B: %d Count: %d" % (red, green, blue, byteArr[i][1])
-      return
+      return retArr
 
-  # Print pixel statistics
-  def createCommonEffect(self, chunkData, pixels):
+  # Create common effect. It will only use colors provided in pixels dict.
+  def createCommonEffect(self, chunkData, pixels, greyPix = True):
+      #chunkData is a string containing whole color information. Each byte is either R, B or G value
       dt = datetime.datetime.now()
       chunkData = zlib.decompress(chunkData)
       chunkData = StringIO.StringIO(chunkData)
       newColorData = bytearray()
-      #chunkData is a string containing whole color information. Each byte is either R, B or G value
       startTime = dt.now()
-      print "Reading pixels and saving only %d most common ones.." % len(pixels)
+      div = 256*256
+      k = 0
+      pixelArray = pixels.items()
+      randMax = len(pixelArray)
+      print "Reading pixels and leaving only %d most common ones.." % len(pixels)
       for i in range(self.height):
         #Discard filter byte:
-        newColorData.append(chunkData.read(1))
+        filt = chunkData.read(1)
+        if filt != b'\x00':
+          print "Filter byte: %d" % struct.unpack("B", filt)[0]
+          raise Warning("Only filter 0 is accepted. Please reconstruct image first")
+        newColorData.append(filt)
         for j in range(self.width):
-          newPixel = bytearray(chunkData.read(3))
-          newVal = (newPixel[0]*256*256) + (newPixel[1]*256) + newPixel[2]
-          if pixels.has_key(newVal):
-            newColorData.append(newVal)
+          Pixel = bytearray(chunkData.read(3))
+          Val = (Pixel[0]*256*256) + (Pixel[1]*256) + Pixel[2]
+          if pixels.has_key(Val):
+            red = Val / div
+            newColorData.append(red)
+            green = (Val - red*div) / 256
+            newColorData.append(green)
+            blue = ((Val - red*div) - green*256)
+            newColorData.append(blue)
+            k += 1
           else:
-            newColorData.append(0)
+            if greyPix:
+              # Add grey pixel
+              newColorData.append(150)
+              newColorData.append(150)
+              newColorData.append(150)
+            else:
+              # Add random pixel from dict
+              randIndex = random.randint(0, randMax-1)
+              Val = pixelArray[randIndex][0]
+              red = Val / div
+              newColorData.append(red)
+              green = (Val - red*div) / 256
+              newColorData.append(green)
+              blue = ((Val - red*div) - green*256)
+              newColorData.append(blue)
+            
+
       print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
       log.debug("Information of %d pixels saved. According to height: %d and width: %d there should be %d pixels"\
         % (k, self.height, self.width, self.height*self.width))
-      byteArr = sorted(byteArr.items(), key = lambda x: x[1], reverse = True)
-      retArr.update(byteArr[0:20])
-      print "Most common pixels:"
-      #pdb.set_trace()
-      for i in range(20):
-        red = byteArr[i][0] / (256*256)
-        green = (byteArr[i][0] % (256*256)) / 256
-        blue = byteArr[i][0] % 256
-        print "R: %d G: %d B: %d Count: %d" % (red, green, blue, byteArr[i][1])
-      return
+      startTime = dt.now()
+      print "Compressing image data.."
+      newColorData = str(newColorData)
+      readyData = zlib.compress(newColorData)
+      print "  ..lasted %f seconds" % (dt.now() - startTime).total_seconds()
+      return readyData
 
   
   #Do some changes to image and save it as newFilename
   def readChunks(self, filename, bytesLine = 0, writeToFile = None, opMode = 0):
-    log.debug("Operating mode: %s" % self.printMode(opMode))
+    #log.debug("Operating mode: %s" % self.printMode(opMode))
+    print "Operating mode: %s" % self.printMode(opMode)
     readFp = open(filename, "r")
     header = readFp.read(8)
     newData = ""
@@ -537,7 +569,7 @@ class PngEdit():
         elif opMode == self.PIXEL_MODE:
           self.printPixel(chunkData)
         elif opMode == self.COMMON_EFFECT_MODE:
-          pixels = self.printPixel(chunkData)
+          pixels = self.printPixel(chunkData, self.pixelCount)
           newData = self.createCommonEffect(chunkData, pixels)
 
 

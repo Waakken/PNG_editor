@@ -20,15 +20,20 @@ def setupArgParser():
   parser.add_option("-H", "--hdr", action = "store_true", dest="readHdr", help="Print image information")
   parser.add_option("-p", "--pixel", action = "store_true", dest="readPixel", help="Print pixel information")
   parser.add_option("-r", "--recon", dest="reconFile", \
-                    help="Save reconstructed data to this file", metavar="FILE")
+                    help="Create new reconstructed file in which all the data chunks are combined and pixel filtering is removed.", metavar="FILE")
   parser.add_option("-e", "--edit", dest="editFile", help="Save edited color data to this file", metavar="FILE")
-  parser.add_option("-s", "--simple", dest="simpleFile", help="Combine all data chunks. Leave only basic chunks to new file", metavar="FILE")
+  parser.add_option("-C", "--common", dest="commonFile", help="Create common-effect and save it to a file", metavar="FILE")
   parser.add_option("--blue", dest="blue", help="In edit mode: Add this value to blue bytes", metavar="INT")
   parser.add_option("--red", dest="red", help="In edit mode: Add this value to red bytes", metavar="INT")
   parser.add_option("--green", dest="green", help="In edit mode: Add this value to green bytes", metavar="INT")
+  parser.add_option("--count", dest="pixelCount", help="In common-effect mode: Leave this many most common pixels", metavar="INT")
   return parser
 
 def main():
+  try:
+    os.unlink("tempfile.png")
+  except OSError:
+    pass
   parser = setupArgParser()
   (options, args) = parser.parse_args()
   if len(args) != 1:
@@ -36,7 +41,7 @@ def main():
 
   if options.readChunks or options.debug:
     p = png(debug = True)
-  elif options.readHdr:
+  elif options.readHdr or options.readPixel:
     p = png(info = True)
   else:
     p = png()
@@ -48,6 +53,8 @@ def main():
     p.redAdj = int(options.red)
   if options.green:
     p.greenAdj = int(options.green)
+  if options.pixelCount:
+    p.pixelCount = int(options.pixelCount)
       
 
   # Print information:
@@ -63,12 +70,13 @@ def main():
     p.readChunks(args[0], bytesLine = int(options.readBytes), opMode = p.BYTES_MODE)
 
   # Create new image:
-  if options.simpleFile:
-    p.readChunks(args[0], writeToFile = options.simpleFile, opMode = p.SIMPLE_MODE)
   if options.reconFile:
-    p.readChunks(args[0], writeToFile = options.reconFile, opMode = p.RECON_MODE)
+    p.readChunks(args[0], writeToFile = "tempfile.png", opMode = p.SIMPLE_MODE)
+    p.readChunks("tempfile.png", writeToFile = options.reconFile, opMode = p.RECON_MODE)
   if options.editFile:
     p.readChunks(args[0], writeToFile = options.editFile, opMode = p.EDIT_MODE)
+  if options.commonFile:
+    p.readChunks(args[0], writeToFile = options.commonFile, opMode = p.COMMON_EFFECT_MODE)
 
 if __name__ == "__main__":
   main()
